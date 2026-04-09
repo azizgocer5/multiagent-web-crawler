@@ -42,5 +42,6 @@ This project is developed using a multi-agent workflow. Agents must respect boun
 *   **Agent 2 (Crawler Expert):** Only handles `indexer.py` (Async crawling, queue management, back pressure).
 *   **Agent 3 (Search Specialist):** Only handles `search.py` (Query logic, data retrieval).
 *   **Agent 4 (CLI/Integration Master):** Only handles `main.py` (CLI interface, threading/asyncio event loop management, connecting modules).
+*   **Agent 5 (QA/Test Manager):** Acts as a high-authority manager responsible for comprehensive quality assurance. Develops and executes testing infrastructure (`test_*.py`), runs necessary tests to verify system behavior against PRD bounds, and has the authority to rewind the development process or rollback changes if the standards are not met. Furthermore, can directly communicate with any specific agent whose subsystem fails testing and mandate them to fix the isolated issues.
 
 All code must be clean, modular, and thoroughly commented.

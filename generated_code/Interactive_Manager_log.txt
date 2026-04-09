@@ -1,0 +1,50 @@
+
+==================================================
+[TIMESTAMP: 2026-04-09 11:59:14 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+main.py: Kullanıcı arayüzünü (CLI) iyileştirmek ve sistem durumunu görünür kılmak için şu değişiklikleri yapın:
+
+1. **Yardım Menüsü:** `help` komutunu genişleterek her komutun (start, search, exit) ne işe yaradığına dair detaylı bir açıklama ekleyin.
+2. **Logging Yapılandırması:** `main.py` dosyasına standart `logging` modülünü import edin ve `logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')` ayarını yapın. 
+3. **Geri Bildirim:** Crawler'ın durumunu anlamak için `indexer.py` içindeki işlemlerle senkronize çalışan log mesajları ekleyin (örneğin; `crawler` sınıfının `process_page` metodunda yapılan işlemleri `main.py` seviyesinde veya doğrudan `indexer.py` içinde loglayın).
+4. **UI İyileştirmesi:** `main.py` içerisindeki `print_banner` fonksiyonuna, programın nasıl kullanılacağına dair kısa bir "Kullanım Kılavuzu" (Örn: "Başlamak için 'start <url>' komutunu girin") bilgisi ekleyin.
+5. **Görünürlük:** `start` komutu tetiklendiğinde kullanıcıya "Crawler arka planda çalışıyor, logları takip edebilirsiniz" şeklinde net bir geri bildirim mesajı verin.
+
+==================================================
+[TIMESTAMP: 2026-04-09 12:01:40 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+indexer.py: The crawler is currently failing because the `Crawler` class in `indexer.py` is missing the `add_to_queue` method that `run()` calls to initialize the crawl, and the `process_page` method signature for `self.db.save_page_and_links` is inconsistent with the `Database` class definition (which expects a dictionary `page_data` rather than separate arguments). Please implement `add_to_queue` in `indexer.py` to interact with the database and update `process_page` to pass data as a dictionary matching the database schema.
+
+==================================================
+[TIMESTAMP: 2026-04-09 12:06:07 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+database.py: The system lacks monitoring for its current state. Please implement two new methods in the `Database` class:
+1. `get_status_report()`: This method should execute a query to count rows in the `pages` table (indexed) and count the rows in the `queue` table grouped by their `state` (e.g., 'pending', 'processing', 'done'). It should return a summary dictionary.
+2. `get_last_logs(limit=10)`: Since there is no formal log table, add a method to return the most recently added URLs from the `pages` table, which will serve as a basic "activity log" for the user to see what the crawler has been working on recently.
+
+Once these are implemented, the `main.py` module can then be updated to call these methods when the user types a `status` command.
+
+==================================================
+[TIMESTAMP: 2026-04-09 12:07:33 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+main.py: The user wants to change the CLI interface to a menu-based interactive system. Modify the `run_cli` function to display a selection menu where: '1' triggers the input for a seed URL and max depth for the crawler, and '2' triggers the input for a search query. Use an `if/elif` structure to handle these inputs, ensuring the `crawler.run()` and `search_engine.search()` methods are called based on the chosen option.
+
+==================================================
+[TIMESTAMP: 2026-04-09 12:07:52 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+indexer.py: The crawler is failing to index because `indexer.py` calls `self.db.save_page_and_links(page_data)` with only one argument, but the `database.py` implementation of `save_page_and_links` requires two arguments: `page_data` and `links`. You must update the `process_page` method in `indexer.py` to pass the extracted links list as a second argument to `self.db.save_page_and_links(page_data, page_data['links'])`.
+
+==================================================
+[TIMESTAMP: 2026-04-09 12:08:39 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+database.py: The `Crawler` class in `indexer.py` calls `db.is_visited(url)` and `db.mark_as_pending(url, depth)`, but these methods do not exist in the `Database` class. You need to implement `is_visited` (which checks if a URL exists in the `pages` or `queue` table) and `mark_as_pending` (which inserts a new URL into the `queue` table) inside `database.py`.
+
+==================================================
+[TIMESTAMP: 2026-04-09 12:09:11 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+main.py: Add a new menu item '4' to the print_menu function titled "Show Status". In the run_cli loop, add an 'elif choice == '4':' block that calls 'await db.get_status_report()', then prints the returned 'total_indexed' count and the 'queue_stats' dictionary in a user-friendly format using the existing Colors class for styling.
+
+==================================================
+[TIMESTAMP: 2026-04-09 12:11:18 | API: GEMINI (gemini-3.1-flash-lite-preview)]
+==================================================
+indexer.py: The crawler's depth logic is flawed. Currently, `process_page` checks `if depth > self.max_depth` after fetching the page, but the `_worker` loop doesn't prevent processing of nodes that are already at `max_depth` when pulled from the queue, leading to over-crawling. More importantly, the `process_page` logic should increment the depth only when adding new discovered links to the queue, while ensuring the current page being processed is within the allowed bounds. Please modify `process_page` to verify `depth <= self.max_depth` before fetching, and ensure the `LinkParser` is correctly extracting text content (including potentially encoded characters) to fix the search failure. Additionally, ensure the crawler correctly handles the depth of discovered links by only adding them to the queue if `depth < self.max_depth`.
