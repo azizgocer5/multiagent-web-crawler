@@ -1,134 +1,163 @@
 import asyncio
-import logging
-import threading
-import aiohttp
 from html.parser import HTMLParser
-from urllib.parse import urljoin
-from database import Database
+from typing import Set
+from urllib.parse import urldefrag, urljoin, urlparse
 
-# Logging yapılandırması
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler("crawler.log"), logging.StreamHandler()]
-)
+import aiohttp
+
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
 
 class MiniParser(HTMLParser):
-    def __init__(self, base_url):
+    def __init__(self, base_url: str) -> None:
         super().__init__()
         self.base_url = base_url
-        self.links = set()
-        self.text = []
-        self.title = ""
-        self._skip = False
+        self.title_parts: list[str] = []
+        self.body_parts: list[str] = []
+        self.links: set[str] = set()
+        self._ignore_depth = 0
         self._in_title = False
 
-    def handle_starttag(self, tag, attrs):
-        if tag in ('script', 'style', 'head'):
-            self._skip = True
-        if tag == 'title':
-            self._in_title = True
-        if tag == 'a':
-            for attr, value in attrs:
-                if attr == 'href':
-                    full_url = urljoin(self.base_url, value)
-                    if full_url.startswith(('http://', 'https://')):
-                        self.links.add(full_url)
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in {"script", "style"}:
+            self._ignore_depth += 1
+            return
 
-    def handle_endtag(self, tag):
-        if tag in ('script', 'style', 'head'):
-            self._skip = False
-        if tag == 'title':
+        if tag == "title":
+            self._in_title = True
+
+        if tag == "a":
+            href = None
+            for attr, value in attrs:
+                if attr == "href":
+                    href = value
+                    break
+            if href:
+                full_url = urljoin(self.base_url, href)
+                full_url, _ = urldefrag(full_url)
+                parsed = urlparse(full_url)
+                if parsed.scheme in {"http", "https"}:
+                    self.links.add(full_url)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style"} and self._ignore_depth > 0:
+            self._ignore_depth -= 1
+        elif tag == "title":
             self._in_title = False
 
-    def handle_data(self, data):
-        if not self._skip:
-            self.text.append(data.strip())
-            if self._in_title:
-                self.title += data.strip()
+    def handle_data(self, data: str) -> None:
+        text = " ".join(data.split()).strip()
+        if not text or self._ignore_depth:
+            return
+        if self._in_title:
+            self.title_parts.append(text)
+        else:
+            self.body_parts.append(text)
 
-    def get_links(self):
-        return list(self.links)
+    def title(self) -> str:
+        return " ".join(self.title_parts).strip()
+
+    def body(self) -> str:
+        return " ".join(self.body_parts).strip()
+
 
 class CrawlerService:
-    def __init__(self, db: Database, worker_count=30):
+    def __init__(self, db, worker_count: int = 10) -> None:
         self.db = db
         self.worker_count = worker_count
-        self.memory_queue = asyncio.Queue(maxsize=100)
         self.db_lock = asyncio.Lock()
+        self.memory_queue: asyncio.Queue[tuple[str, int]] = asyncio.Queue(maxsize=100)
+        self._background_tasks: Set[asyncio.Task] = set()
         self._running = False
 
-    async def _worker(self, session, max_depth):
+    async def _worker(self, session: aiohttp.ClientSession) -> None:
         while self._running:
             try:
                 url, depth = await self.memory_queue.get()
-                
-                if depth > max_depth:
-                    self.db.mark_done(url)
-                    self.memory_queue.task_done()
-                    continue
+            except asyncio.CancelledError:
+                break
 
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if 'text/html' not in response.headers.get('Content-Type', ''):
-                        self.db.mark_done(url)
-                        self.memory_queue.task_done()
-                        continue
-
-                    html = await response.text()
-                    parser = MiniParser(url)
-                    parser.feed(html)
-                    
-                    async with self.db_lock:
-                        self.db.save_page(url, parser.title, " ".join(parser.text))
-                        if depth < max_depth:
-                            self.db.add_to_queue(parser.get_links(), depth + 1)
-                        self.db.mark_done(url)
-                
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logging.warning(f"Network error for {url}: {e}")
-                self.db.mark_done(url)
-            except Exception as e:
-                logging.error(f"Unexpected error processing {url}: {e}")
-                self.db.mark_done(url)
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    content_type = resp.headers.get("Content-Type", "").lower()
+                    if "text/html" in content_type:
+                        html = await resp.text(errors="ignore")
+                        parser = MiniParser(url)
+                        parser.feed(html)
+                        await self.db.save_page(
+                            url,
+                            parser.title(),
+                            parser.body(),
+                            url,
+                            depth,
+                            self.db_lock,
+                        )
+                        if depth > 0:
+                            await self.db.add_to_queue(
+                                list(parser.links),
+                                depth - 1,
+                                self.db_lock,
+                            )
+            except Exception:
+                pass
             finally:
+                await self.db.mark_done(url, self.db_lock)
                 self.memory_queue.task_done()
 
-    async def _run_index_job(self, max_depth):
-        while self._running:
-            if self.memory_queue.qsize() >= 100:
-                await asyncio.sleep(0.5)
-                continue
+    async def _run_index_job(self, max_depth: int) -> None:
+        connector = aiohttp.TCPConnector(limit=self.worker_count)
+        async with aiohttp.ClientSession(headers=HEADERS, connector=connector) as session:
+            workers = [
+                asyncio.create_task(self._worker(session))
+                for _ in range(self.worker_count)
+            ]
+            try:
+                while self._running:
+                    if self.memory_queue.qsize() >= self.memory_queue.maxsize:
+                        await asyncio.sleep(0.2)
+                        continue
 
-            pending = self.db.get_pending(limit=10)
-            if not pending:
-                await asyncio.sleep(0.5)
-                continue
+                    pending = await self.db.get_pending(10)
+                    if not pending:
+                        await asyncio.sleep(0.2)
+                        continue
 
-            for url, depth in pending:
-                if depth <= max_depth:
-                    self.db.mark_processing(url)
-                    await self.memory_queue.put((url, depth))
-            
-            await asyncio.sleep(0.1)
+                    for url, depth in pending:
+                        await self.db.mark_processing(url, self.db_lock)
+                        await self.memory_queue.put((url, depth))
+                    await asyncio.sleep(0)
+            finally:
+                for worker in workers:
+                    worker.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
 
-    async def start(self, seed_url, max_depth):
+    async def _engine(self, seed_url: str | None, max_depth: int) -> None:
         self._running = True
         if seed_url:
-            self.db.add_to_queue([seed_url], 0)
-        
+            await self.db.force_pending(seed_url, max_depth, self.db_lock)
         try:
-            async with aiohttp.ClientSession() as session:
-                workers = [asyncio.create_task(self._worker(session, max_depth)) for _ in range(self.worker_count)]
-                indexer = asyncio.create_task(self._run_index_job(max_depth))
-                await asyncio.gather(*workers, indexer)
-        except Exception as e:
-            logging.critical(f"Crawler service failed to start/run: {e}")
+            await self._run_index_job(max_depth)
         finally:
             self._running = False
 
-    def start_in_background(self, seed_url, max_depth):
-        threading.Thread(target=lambda: asyncio.run(self.start(seed_url, max_depth)), daemon=True).start()
+    def start_in_background(self, seed_url: str, max_depth: int) -> None:
+        task = asyncio.create_task(self._engine(seed_url, max_depth))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
-    def resume_in_background(self, max_depth):
-        self._running = True
-        threading.Thread(target=lambda: asyncio.run(self.start(None, max_depth)), daemon=True).start()
+    def resume_in_background(self, max_depth: int) -> None:
+        task = asyncio.create_task(self._engine(None, max_depth))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    def stop(self) -> None:
+        self._running = False
+        for task in list(self._background_tasks):
+            task.cancel()

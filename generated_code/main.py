@@ -1,91 +1,72 @@
 import asyncio
-import logging
 import sys
-import traceback
-from database import Database
+
 from crawler_service import CrawlerService
+from database import Database
 
-# Loglama ayarları
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler("crawler.log"), logging.StreamHandler()]
-)
 
-async def main():
-    db = Database('crawler.db')
-    service = CrawlerService(db)
-    
-    print("Mini Google CLI Başlatıldı. Komutlar: crawl, search, status, resume, exit")
-    
+async def main() -> None:
+    db = Database("crawler.db")
+    crawler = CrawlerService(db)
+
+    print("Mini Search Engine CLI")
+    print("Commands: crawl <url> <depth>, search <query>, status, resume, exit")
+
     try:
         while True:
-            try:
-                # CLI üzerinden asenkron girdi alma
-                cmd_input = await asyncio.to_thread(input, '> ')
-                parts = cmd_input.split()
-                if not parts:
-                    continue
-                
-                cmd = parts[0].lower()
-                
-                if cmd == 'crawl':
-                    if len(parts) < 3:
-                        print("Kullanım: crawl <url> <depth>")
-                        continue
-                    url, depth = parts[1], int(parts[2])
-                    db.set_setting('max_depth', str(depth))
-                    db.add_to_queue([url], depth=0)
-                    service.start_in_background(url, depth)
-                    print(f"Crawling başlatıldı: {url}")
+            raw = await asyncio.to_thread(input, "> ")
+            parts = raw.strip().split()
+            if not parts:
+                continue
 
-                elif cmd == 'search':
-                    query = " ".join(parts[1:])
-                    if not query:
-                        print("Arama terimi girin.")
-                        continue
-                    try:
-                        results = db.search(query)
-                        if not results:
-                            print("Sonuç bulunamadı.")
-                        else:
-                            for depth, url, origin in results:
-                                print(f"[{depth}] {url} (kaynak: {origin})")
-                    except Exception as e:
-                        logging.error(f"Arama hatası: {traceback.format_exc()}")
-                        print("Arama işlemi başarısız oldu. Lütfen crawler.log dosyasını kontrol edin.")
+            cmd = parts[0].lower()
 
-                elif cmd == 'status':
-                    status = db.get_status()
-                    print(f"Bekleyen: {status['pending']} | İşleniyor: {status['processing']} | Tamamlanan: {status['done']}")
+            if cmd == "crawl" and len(parts) >= 3:
+                url = parts[1]
+                depth = int(parts[2])
+                await db.set_setting("max_depth", str(depth), crawler.db_lock)
+                crawler.start_in_background(url, depth)
+                print(f"Started crawling {url} at depth {depth}")
 
-                elif cmd == 'resume':
-                    db.resume_processing()
-                    max_depth = int(db.get_setting('max_depth') or 2)
-                    service.resume_in_background(max_depth)
-                    print("İşlemler devam ettiriliyor...")
-
-                elif cmd == 'exit':
-                    print("Kapatılıyor...")
-                    service.stop()
-                    break
-
+            elif cmd == "search" and len(parts) >= 2:
+                query = " ".join(parts[1:])
+                results = await db.search(query)
+                if not results:
+                    print("No results found.")
                 else:
-                    print("Bilinmeyen komut. Kullanılabilir: crawl, search, status, resume, exit")
+                    for row in results:
+                        print(
+                            f"[depth={row['depth']}] {row['title']} | "
+                            f"{row['url']} | origin={row['origin_url']}"
+                        )
 
-            except Exception as e:
-                logging.error(f"Komut işleme hatası: {traceback.format_exc()}")
-                print(f"Bir hata oluştu: {e}")
-                
-    except KeyboardInterrupt:
-        print("\nKullanıcı tarafından durduruldu.")
+            elif cmd == "status":
+                status = await db.get_status()
+                print(
+                    f"Pending: {status['pending']}, "
+                    f"Processing: {status['processing']}, "
+                    f"Done: {status['done']}"
+                )
+                print(f"Active background tasks: {len(crawler._background_tasks)}")
+
+            elif cmd == "resume":
+                await db.resume_processing(crawler.db_lock)
+                max_depth = int(await db.get_setting("max_depth") or "2")
+                crawler.resume_in_background(max_depth)
+                print("Resumed crawl.")
+
+            elif cmd == "exit":
+                break
+
+            else:
+                print("Unknown command or missing arguments.")
     finally:
-        service.stop()
-        print("Sistem güvenli bir şekilde kapatıldı.")
+        crawler.stop()
+        await db.close()
+
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except Exception as e:
-        logging.critical(f"Uygulama çöktü: {traceback.format_exc()}")
-        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(0)

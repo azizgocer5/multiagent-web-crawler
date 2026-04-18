@@ -1,0 +1,63 @@
+[2026-04-18 20:11:45,914] [INFO] Tables checked/created successfully.
+[2026-04-18 20:11:45,914] [INFO] Database initialized at crawler.db with WAL mode.
+[2026-04-18 20:11:54,230] [ERROR] Hata: list index out of range
+[2026-04-18 20:11:58,797] [ERROR] Hata: Database.set_setting() missing 1 required positional argument: 'lock'
+[2026-04-18 20:12:06,174] [ERROR] Hata: Database.set_setting() missing 1 required positional argument: 'lock'
+[2026-04-18 20:13:10,338] [INFO] Database tables initialized.
+[2026-04-18 20:13:14,311] [ERROR] Hata: Database.set_setting() missing 1 required positional argument: 'lock'
+[2026-04-18 20:22:36,716] Database tables initialized.
+[2026-04-18 20:22:40,923] Indexer job started.
+[2026-04-18 20:25:22,610] Database tables initialized.
+[2026-04-18 20:25:26,588] Indexer job started.
+[2026-04-18 20:27:20,334] Database tables initialized.
+[2026-04-18 20:27:24,485] Indexer job started.
+[2026-04-18 20:31:23,299] Database tables initialized.
+[2026-04-18 20:31:32,850] Indexer job started.
+[2026-04-18 20:31:54,938] Database tables initialized.
+[2026-04-18 20:31:56,354] Indexer job started.
+[2026-04-18 20:34:33,723] Database: Database tables initialized.
+[2026-04-18 20:34:38,094] CrawlerService: Indexer job started. Max depth: 1
+[2026-04-18 20:36:32,710] Database: Database tables initialized.
+[2026-04-18 20:36:37,900] CrawlerService: Indexer job started. Max depth: 1
+[2026-04-18 20:36:38,515] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:37:44,650] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:37:44,651] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:37:45,277] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:38:25,420] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:38:25,420] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:38:25,656] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:39:03,527] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/B%C3%83%C2%BClent_Ecevit
+[2026-04-18 20:39:03,527] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:39:04,008] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/B%C3%83%C2%BClent_Ecevit
+[2026-04-18 20:39:56,820] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/B%C3%83%C2%BClent_Ecevit
+[2026-04-18 20:39:56,821] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:39:57,055] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/B%C3%83%C2%BClent_Ecevit
+[2026-04-18 20:40:49,834] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/B%C3%BClent_Ecevit
+[2026-04-18 20:40:49,834] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:40:50,343] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/B%C3%BClent_Ecevit
+[2026-04-18 20:44:09,359] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/B%C3%BClent_Ecevit
+[2026-04-18 20:44:09,360] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:45:34,276] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:45:34,276] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:45:34,516] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:46:50,872] CrawlerService: Seed URL added: https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:46:50,872] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:46:51,123] CrawlerService: HTTP 404 | https://tr.wikipedia.org/wiki/BÃ¼lent_Ecevit
+[2026-04-18 20:47:59,465] CrawlerService: Seed URL added: https://en.wikipedia.org/wiki/Mustafa_Kemal_Atat%C3%BCrk
+[2026-04-18 20:47:59,465] CrawlerService: Indexer started (Target depth: 1)
+[2026-04-18 20:50:45,506] CrawlerService: Seed URL: https://en.wikipedia.org/wiki/Mustafa_Kemal_AtatÃ¼rk
+[2026-04-18 20:50:45,507] CrawlerService: Indexer started (Depth: 1)
+[2026-04-18 20:50:46,299] CrawlerService: HTTP 404 | https://en.wikipedia.org/wiki/Mustafa_Kemal_AtatÃ¼rk
+[2026-04-18 20:51:35,422] CrawlerService: Seed URL: https://en.wikipedia.org/wiki/Mustafa_Kemal_AtatÃ¼rk
+[2026-04-18 20:51:35,423] CrawlerService: Indexer started (Depth: 1)
+[2026-04-18 20:51:35,425] CrawlerService: Processing: https://en.wikipedia.org/wiki/Mustafa_Kemal_AtatÃ¼rk
+[2026-04-18 20:51:35,674] CrawlerService: HTTP 404 | https://en.wikipedia.org/wiki/Mustafa_Kemal_AtatÃ¼rk
+[2026-04-18 20:52:18,567] CrawlerService: Seed URL: https://en.wikipedia.org/wiki/Mustafa_Kemal_Atat%C3%BCrk
+[2026-04-18 20:52:18,568] CrawlerService: Indexer started (Depth: 1)
+[2026-04-18 20:52:18,569] CrawlerService: Processing: https://en.wikipedia.org/wiki/Mustafa_Kemal_Atat%C3%BCrk
+[2026-04-18 20:54:06,321] CrawlerService: Seed URL: https://en.wikipedia.org/wiki/Mustafa_Kemal_Atat%C3%BCrk
+[2026-04-18 20:54:06,322] CrawlerService: Indexer started (Depth: 1)
+[2026-04-18 20:54:06,322] CrawlerService: Processing: https://en.wikipedia.org/wiki/Mustafa_Kemal_Atat%C3%BCrk
+[2026-04-18 20:54:38,316] CrawlerService: Seed URL: https://en.wikipedia.org/wiki/Mustafa_Kemal_Atat%C3%BCrk
+[2026-04-18 20:54:38,316] CrawlerService: Indexer started (Depth: 1)
+[2026-04-18 20:54:38,317] CrawlerService: Processing: https://en.wikipedia.org/wiki/Mustafa_Kemal_Atat%C3%BCrk
