@@ -114,7 +114,7 @@ architect = Agent(
         "Tasarımın diğer tüm agent'ların referans belgesi olur."
     ),
     llm=active_llm,
-    verbose=True,
+    verbose=False,
 )
 
 db_engineer = Agent(
@@ -126,7 +126,7 @@ db_engineer = Agent(
         "Race condition senin sözlüğünde yoktur."
     ),
     llm=active_llm,
-    verbose=True,
+    verbose=False,
 )
 
 crawler_dev = Agent(
@@ -138,7 +138,7 @@ crawler_dev = Agent(
         "asyncio.sleep() senin için nefes almak gibidir."
     ),
     llm=active_llm,
-    verbose=True,
+    verbose=False,
 )
 
 cli_dev = Agent(
@@ -150,7 +150,7 @@ cli_dev = Agent(
         "requirements.txt'i minimal tutarsın: gereksiz bağımlılık eklemek karakterine aykırıdır."
     ),
     llm=active_llm,
-    verbose=True,
+    verbose=False,
 )
 
 qa = Agent(
@@ -162,7 +162,7 @@ qa = Agent(
         "Onayladığın kod production'a gider."
     ),
     llm=active_llm,
-    verbose=True,
+    verbose=False,
 )
 
 # ── Task Factory Fonksiyonları ────────────────────────────────

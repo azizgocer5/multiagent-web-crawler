@@ -36,9 +36,10 @@ TASK_BUILDER_MAP = {
 
 # ── LLM Manager Routing ────────────────────────────────────────
 
-def analyze_with_llm(user_message: str) -> tuple[list, dict]:
+def analyze_with_llm(user_message: str) -> tuple[str, list, dict]:
     """
-    Kullanıcı isteğini LLM ile analiz eder, çalıştırılacak ajan rotasını (route)
+    Kullanıcı isteğini LLM ile analiz eder, kullanıcının ne demek istediğini (understanding),
+    çalıştırılacak ajan rotasını (route)
     ve her biri için özelleştirilmiş açıklamaları (custom_prompts) belirler.
     """
     import json
@@ -59,6 +60,7 @@ Asla genel yorum yapma, direkt sorunu çözmeye yönelik talimatlar ver.
 
 LÜTFEN SADECE AŞAĞIDAKİ JSON FORMATINDA YANIT VER, başka hiçbir metin veya markdown ekleme:
 {
+  "understanding": "Kullanıcı crawler'ın depth=1 iken fazla derine indiğini söylüyor. Bunun detaylıca incelenip çözülmesini istiyor.",
   "route": ["crawler", "cli", "qa"],
   "custom_prompts": {
     "crawler": "Kullanıcı crawler'ın depth=1 iken fazla derine indiğini söylüyor. _worker fonksiyonunda depth <= max_depth şartını düzelt ve loop mantığını revize et.",
@@ -87,6 +89,7 @@ LÜTFEN SADECE AŞAĞIDAKİ JSON FORMATINDA YANIT VER, başka hiçbir metin veya
         content = re.sub(r'```\s*', '', content)
         
         data = json.loads(content)
+        understanding = data.get("understanding", "Kullanıcının isteği analiz edildi.")
         route = data.get("route", ["architect", "db", "crawler", "cli", "qa"])
         prompts = data.get("custom_prompts", {})
         
@@ -96,11 +99,11 @@ LÜTFEN SADECE AŞAĞIDAKİ JSON FORMATINDA YANIT VER, başka hiçbir metin veya
         # Önceliği PIPELINE_ORDER'a göre ayarla
         route = [r for r in PIPELINE_ORDER if r in route]
         
-        return route, prompts
+        return understanding, route, prompts
         
     except Exception as e:
         print(f"⚠️ [MANAGER] LLM Analiz hatası: {e}\nVarsayılan tüm pipeline çalıştırılacak.")
-        return PIPELINE_ORDER[:], {}
+        return "Analiz başarısız oldu, tüm pipeline çalıştırılıyor.", PIPELINE_ORDER[:], {}
 
 # ── Task Zinciri ──────────────────────────────────────────────
 
@@ -116,7 +119,7 @@ def build_tasks(route: list, custom_prompts: dict, original_request: str) -> lis
             continue
         context = [prev] if prev else []
         instruction = custom_prompts.get(key, original_request)
-        task = TASK_BUILDER_MAP[key](manager_instruction=instruction, context=context)
+        task = TASK_BUILDER_MAP[key](user_request=instruction, context=context)
         tasks.append(task)
         prev = task
     return tasks
@@ -209,16 +212,16 @@ import sys
 
 def run_manager(request: str):
     """Tek bir prompt için süreci işletir."""
-    route, custom_prompts = analyze_with_llm(request)
+    understanding, route, custom_prompts = analyze_with_llm(request)
     
     print("\n" + "="*50)
-    print(f"🚀 [MANAGER] Akıllı Rotalama (Seçilen Ajanlar ve Talimatları):")
+    print(f"🧐 [MANAGER] Sorumdan Anladığı:\n ➡️  {understanding}\n")
+    print(f"🚀 [MANAGER] Akıllı Rotalama (Çağrılan Ajanlar ve Verilen Komutlar):")
     for agent_key in route:
         instruction = custom_prompts.get(agent_key, request)
-        # Çok uzunsa keserek göster
-        preview = (instruction[:80] + '...') if len(instruction) > 80 else instruction
-        print(f" 🔹 {agent_key.upper()}: {preview}")
-    print("="*50 + "\n")
+        print(f"\n 🔹 {agent_key.upper()} AJANI:")
+        print(f"    Söylenen: {instruction}")
+    print("\n" + "="*50 + "\n")
 
     tasks = build_tasks(route, custom_prompts, request)
     active_agents = [AGENT_MAP[key] for key in PIPELINE_ORDER if key in route]
@@ -227,12 +230,21 @@ def run_manager(request: str):
         agents=active_agents,
         tasks=tasks,
         process=Process.sequential,
-        verbose=True,
+        verbose=False,
     )
 
     print(f"⏳ [MANAGER] {len(tasks)} görev sırasıyla çalıştırılıyor...\n")
     crew.kickoff()
     
+    print("\n" + "="*50)
+    print("🎯 [MANAGER] Ajanlardan Gelen Cevaplar / Çıktılar:")
+    for task in tasks:
+        role = task.agent.role
+        raw_output = task.output.raw if hasattr(task.output, "raw") else str(task.output)
+        preview = raw_output.replace('\n', ' ')[:100] + "..." if len(raw_output) > 100 else raw_output.replace('\n', ' ')
+        print(f"\n 🔹 {role} Cevabı:\n    {preview}")
+    print("="*50)
+
     print("\n💾 [MANAGER] Görevler bitti, çıktılar diske yazılıyor...")
     save_outputs(tasks)
 

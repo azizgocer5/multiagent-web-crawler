@@ -36,12 +36,18 @@ A simple Command Line Interface (or basic web UI) to interact with the system.
     2. Search for a keyword (`search <keyword>`).
     3. View System State (`status`): Show indexing progress, current queue depth, active workers, and back pressure status.
 
+### 3.4. AI Orchestrator Layer (Development Environment)
+The project includes a self-modifying, interactive AI Builder environment.
+*   **`manager.py` (The Interactive Orchestrator):** A command-line tool that acts as the "Head Engineer". It accepts natural language queries from the developer, analyzes the intent using an LLM, and decides exactly which files or modules need updates. It then formulates customized task directives (prompts) tailored specifically to address the requested issue.
+*   **`crew.py` (The Multi-Agent Crew):** Implements a CrewAI structure utilizing a dynamic model fallback chain (via `litellm`). It spins up designated AI agents (Architect, DB Engineer, Crawler Dev, CLI Engineer, QA) who act on the tailored instructions injected by the Manager, executing parallelly to rewrite and test the core Python scripts automatically.
+
 ## 4. Multi-Agent Development Guidelines
-This project is developed and orchestrated using a CrewAI-based multi-agent workflow. Agents must respect their clear boundaries and generated artifacts:
+This project is developed and orchestrated using a CrewAI-based multi-agent workflow augmented by an active Reasoning Manager. Agents must respect their clear boundaries and generated artifacts:
+*   **The Head Manager (`manager.py`):** Not a standard agent, but an LLM-powered orchestrator taking user's direct commands, doing semantic analysis, and triggering the correct subset of the agents below with specialized instructions.
 *   **Agent 1 (System Architect):** Determines the overall system design, thread boundaries, and concurrency model. Output: `architecture.md`.
 *   **Agent 2 (Database Engineer):** Handles `database.py` (Schema, WAL mode config, thread-safe asynchronous operations, and search queries).
 *   **Agent 3 (Crawler/Async System Developer):** Handles `crawler_service.py` (Async IO, `aiohttp` web crawling, queue management, back pressure).
 *   **Agent 4 (CLI & Integration Engineer):** Handles `main.py` (Interactive CLI, orchestrating the event loops and background worker threads) and `requirements.txt`.
-*   **Agent 5 (QA Engineer):** Acts as a code reviewer to analyze the generated pieces. Produces a detailed quality assurance and bug evaluation report (`qa_report.md`).
+*   **Agent 5 (QA Engineer):** Acts as a compulsory code reviewer to analyze the generated pieces. Produces a detailed quality assurance and bug evaluation report (`qa_report.md`).
 
 All code must be clean, modular, and thoroughly commented.
