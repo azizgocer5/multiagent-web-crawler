@@ -15,37 +15,6 @@ from crew import (
     make_cli_task, make_qa_task,
 )
 
-# ── Routing Tablosu ───────────────────────────────────────────
-# SIRALAMA ÖNEMLİ: daha spesifik keyword'ler üstte olmalı.
-# "fix_crawler" → "fix"ten önce, "fix" → genel keyword'lerden önce.
-
-ROUTE_MAP = [
-    ("fix_main",    ["cli"]),
-    ("fix_crawler", ["crawler"]),
-    ("fix",         ["crawler", "cli"]),
-    ("hepsi",       ["architect", "db", "crawler", "cli", "qa"]),
-    ("tumu",        ["architect", "db", "crawler", "cli", "qa"]),
-    ("tümü",        ["architect", "db", "crawler", "cli", "qa"]),
-    ("bastan",      ["architect", "db", "crawler", "cli", "qa"]),
-    ("baştan",      ["architect", "db", "crawler", "cli", "qa"]),
-    ("sifirdan",    ["architect", "db", "crawler", "cli", "qa"]),
-    ("sıfırdan",    ["architect", "db", "crawler", "cli", "qa"]),
-    ("mimari",      ["architect"]),
-    ("tasarım",     ["architect"]),
-    ("database",    ["architect", "db"]),
-    ("veritabanı",  ["architect", "db"]),
-    ("crawler",     ["architect", "db", "crawler"]),
-    ("parser",      ["architect", "db", "crawler"]),
-    ("worker",      ["architect", "db", "crawler"]),
-    ("cli",         ["architect", "db", "crawler", "cli"]),
-    ("main",        ["architect", "db", "crawler", "cli"]),
-    ("komut",       ["architect", "db", "crawler", "cli"]),
-    ("qa",          ["qa"]),
-    ("test",        ["qa"]),
-    ("kontrol",     ["qa"]),
-    ("denetle",     ["qa"]),
-]
-
 # Sabit pipeline sırası — task'lar ve agent'lar hep bu sıraya göre kurulur.
 PIPELINE_ORDER = ["architect", "db", "crawler", "cli", "qa"]
 
@@ -65,26 +34,80 @@ TASK_BUILDER_MAP = {
     "qa":        make_qa_task,
 }
 
-# ── Routing ───────────────────────────────────────────────────
+# ── LLM Manager Routing ────────────────────────────────────────
 
-def detect_route(user_message: str) -> list:
+def analyze_with_llm(user_message: str) -> tuple[list, dict]:
     """
-    ROUTE_MAP'i sırayla tarar (list of tuples → öncelik korunur).
-    İlk eşleşen keyword'ün agent listesini döner.
-    Eşleşme yoksa tüm pipeline çalışır.
+    Kullanıcı isteğini LLM ile analiz eder, çalıştırılacak ajan rotasını (route)
+    ve her biri için özelleştirilmiş açıklamaları (custom_prompts) belirler.
     """
-    msg = user_message.lower()
-    for keyword, agents in ROUTE_MAP:
-        if keyword in msg:
-            return agents
-    return PIPELINE_ORDER[:]  # Varsayılan: hepsi
+    import json
+    import litellm
+    from crew import ACTIVE_MODEL_NAME, ACTIVE_API_KEY
+    
+    sys_prompt = '''Sen, bir Multi-Agent (Çoklu Ajan) sisteminin Baş Mühendisi ve karar alıcısısın (Manager).
+Ekibinde şu ajanlar var:
+1) "architect": Projenin sistem mimarisini ve arayüz/fonksiyon imzalarını tanımlar.
+2) "db": database.py'yi yazar. (SQLite WAL, executemany vb.)
+3) "crawler": crawler_service.py ve aiohttp asenkron mekanizmasını yazar.
+4) "cli": main.py'deki komut satırı arayüzünü ve çalıştırıcı döngüyü yazar.
+5) "qa": Önceki ajanların ürettiği kodu inceler ve rapor çıkarır. QA HER ZAMAN ÇALIŞMALIDIR.
+
+Kullanıcının isteğini analiz et ve SADECE etkilenmesi gereken ajanları seç (ancak 'qa' her zaman seçilmelidir). Gerekli değilse hepsini çalıştırma.
+Seçtiğin HER BİR ajan için, o ajana özel "Ne yapması gerektiğine dair" emirler/talimatlar türet. Bu emirler ajana özel, teknik ve net olmalı.
+Asla genel yorum yapma, direkt sorunu çözmeye yönelik talimatlar ver.
+
+LÜTFEN SADECE AŞAĞIDAKİ JSON FORMATINDA YANIT VER, başka hiçbir metin veya markdown ekleme:
+{
+  "route": ["crawler", "cli", "qa"],
+  "custom_prompts": {
+    "crawler": "Kullanıcı crawler'ın depth=1 iken fazla derine indiğini söylüyor. _worker fonksiyonunda depth <= max_depth şartını düzelt ve loop mantığını revize et.",
+    "cli": "Kullanıcının aradığı argüman desteğini komut dinleyicisine ekle.",
+    "qa": "Özellikle crawler_service içindeki max_depth mantığının doğru uygulanıp uygulanmadığını sıkı bir şekilde denetle."
+  }
+}'''
+
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": f"Kullanıcı İsteği: {user_message}"}
+    ]
+
+    print(f"🧠 [MANAGER] İstek analiz ediliyor (Model: {ACTIVE_MODEL_NAME})...")
+    
+    try:
+        response = litellm.completion(
+            model=ACTIVE_MODEL_NAME,
+            api_key=ACTIVE_API_KEY,
+            messages=messages,
+            temperature=0.1
+        )
+        content = response.choices[0].message.content.strip()
+        
+        content = re.sub(r'```json\s*', '', content)
+        content = re.sub(r'```\s*', '', content)
+        
+        data = json.loads(content)
+        route = data.get("route", ["architect", "db", "crawler", "cli", "qa"])
+        prompts = data.get("custom_prompts", {})
+        
+        if "qa" not in route:
+            route.append("qa")
+            
+        # Önceliği PIPELINE_ORDER'a göre ayarla
+        route = [r for r in PIPELINE_ORDER if r in route]
+        
+        return route, prompts
+        
+    except Exception as e:
+        print(f"⚠️ [MANAGER] LLM Analiz hatası: {e}\nVarsayılan tüm pipeline çalıştırılacak.")
+        return PIPELINE_ORDER[:], {}
 
 # ── Task Zinciri ──────────────────────────────────────────────
 
-def build_tasks(route: list, user_request: str) -> list:
+def build_tasks(route: list, custom_prompts: dict, original_request: str) -> list:
     """
     Seçilen agent'lar için task'ları PIPELINE_ORDER sırasına göre kurar.
-    Her task bir öncekinin çıktısını context olarak alır.
+    LLM tarafından üretilmiş özel promptları ajanlara enjekte eder.
     """
     tasks = []
     prev = None
@@ -92,7 +115,8 @@ def build_tasks(route: list, user_request: str) -> list:
         if key not in route:
             continue
         context = [prev] if prev else []
-        task = TASK_BUILDER_MAP[key](user_request=user_request, context=context)
+        instruction = custom_prompts.get(key, original_request)
+        task = TASK_BUILDER_MAP[key](manager_instruction=instruction, context=context)
         tasks.append(task)
         prev = task
     return tasks
@@ -180,49 +204,88 @@ def save_outputs(tasks: list):
 
 # ── Ana Döngü ─────────────────────────────────────────────────
 
-def main():
-    print("=" * 60)
-    print("  Web Crawler Builder -- AI Gelistirme Asistani")
-    print("  Ne yapmami istersin? (cikmak icin 'exit')")
-    print("=" * 60)
+import argparse
+import sys
+
+def run_manager(request: str):
+    """Tek bir prompt için süreci işletir."""
+    route, custom_prompts = analyze_with_llm(request)
+    
+    print("\n" + "="*50)
+    print(f"🚀 [MANAGER] Akıllı Rotalama (Seçilen Ajanlar ve Talimatları):")
+    for agent_key in route:
+        instruction = custom_prompts.get(agent_key, request)
+        # Çok uzunsa keserek göster
+        preview = (instruction[:80] + '...') if len(instruction) > 80 else instruction
+        print(f" 🔹 {agent_key.upper()}: {preview}")
+    print("="*50 + "\n")
+
+    tasks = build_tasks(route, custom_prompts, request)
+    active_agents = [AGENT_MAP[key] for key in PIPELINE_ORDER if key in route]
+
+    crew = Crew(
+        agents=active_agents,
+        tasks=tasks,
+        process=Process.sequential,
+        verbose=True,
+    )
+
+    print(f"⏳ [MANAGER] {len(tasks)} görev sırasıyla çalıştırılıyor...\n")
+    crew.kickoff()
+    
+    print("\n💾 [MANAGER] Görevler bitti, çıktılar diske yazılıyor...")
+    save_outputs(tasks)
+
+    print("\n✅ [MANAGER] BÜTÜN İŞLEMLER BAŞARIYLA TAMAMLANDI!")
+
+def interactive_mode():
+    """Etkileşimli terminal döngüsü."""
+    print("\n" + "#" * 70)
+    print("🤖 WEB CRAWLER BUILDER -- YAPAY ZEKA GELİŞTİRME ASİSTANI 🤖")
+    print("#" * 70)
+    print(" Sistem mimariyi, veritabanını, backend kodlarını ve testleri yönetir.")
+    print(" İstediğiniz değişikliği tek cümleyle söylemeniz yeterlidir.")
+    print(" (Çıkmak için: 'exit', 'cikis', veya 'q' yazın)\n")
 
     while True:
         try:
-            user_input = input("\nSen: ").strip()
+            user_input = input("🗣️ Sen: ").strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nGorusuruz!")
+            print("\n👋 Görüşmek üzere!")
             break
 
         if not user_input:
             continue
-        if user_input.lower() in ("exit", "cikis", "q"):
-            print("Gorusuruz!")
+        if user_input.lower() in ("exit", "cikis", "quit", "q"):
+            print("\n👋 Görüşmek üzere!")
             break
 
-        route = detect_route(user_input)
-        print(f"\n[Manager] Calisacak agent'lar: {' -> '.join(route)}")
+        run_manager(user_input)
+        print("\n" + "-" * 70)
+        print("❓ Başka bir isteğiniz var mı?")
 
-        tasks = build_tasks(route, user_input)
-
-        # Agent listesi task sırasıyla eşleşsin (PIPELINE_ORDER garantisi)
-        active_agents = [AGENT_MAP[key] for key in PIPELINE_ORDER if key in route]
-
-        crew = Crew(
-            agents=active_agents,
-            tasks=tasks,
-            process=Process.sequential,
-            verbose=True,
-        )
-
-        print(f"[Manager] {len(tasks)} gorev baslatiliyor...\n")
-        crew.kickoff()
-
-        save_outputs(tasks)
-
-        print("=" * 60)
-        print("[Manager] Tum gorevler tamamlandi.")
-        print("Baska bir sey ister misin?")
-
+def main():
+    parser = argparse.ArgumentParser(
+        description="Multi-Agent AI Manager for Web Crawler",
+        epilog="Kullanım: 'python manager.py' (Etkileşimli mod) VEYA 'python manager.py \"veritabanını düzelt\"' (Tek seferlik komut)"
+    )
+    
+    # Tüm argüman stringlerini birleştirip tek bir prompt elde edeceğiz.
+    parser.add_argument(
+        "prompt",
+        nargs="*",
+        help="Yapay zeka takımına verilecek geliştirme veya düzeltme talimatı."
+    )
+    
+    args = parser.parse_args()
+    prompt_text = " ".join(args.prompt).strip()
+    
+    if prompt_text:
+        # Eğer dışarıdan argüman verilmişse sadece onu işleyip çıkış yapar
+        run_manager(prompt_text)
+    else:
+        # Kod normal çağırılmışsa sürekli prompt'ta bekler
+        interactive_mode()
 
 if __name__ == "__main__":
     main()

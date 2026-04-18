@@ -33,11 +33,15 @@ MODEL_CHAIN = [
 ]
 
 
+ACTIVE_MODEL_NAME = None
+ACTIVE_API_KEY = None
+
 def _select_llm() -> LLM:
     """
     Model zincirini en iyiden en dusuge dener.
     Ilk basarili yanit veren modeli secer ve doner.
     """
+    global ACTIVE_MODEL_NAME, ACTIVE_API_KEY
     for entry in MODEL_CHAIN:
         model_name = entry["model"]
         api_key = entry["api_key"]
@@ -59,6 +63,10 @@ def _select_llm() -> LLM:
             result = response.choices[0].message.content.strip()
             print(f"OK! Yanit: {result}")
             print(f"  [WIN]  Secilen model: {model_name}\n")
+            
+            ACTIVE_MODEL_NAME = model_name
+            ACTIVE_API_KEY = api_key
+            
             return LLM(
                 model=model_name,
                 api_key=api_key,
@@ -163,7 +171,7 @@ def make_architect_task(user_request: str, context: list) -> Task:
     return Task(
         description=(
             f"{ARCHITECTURE_BRIEF}\n\n"
-            f"Kullanıcı isteği: {user_request}\n\n"
+            f"Kullanıcı isteği yerine Yönetici Asistan Talimatı: {user_request}\n\n"
             "Şunları üret:\n"
             "1. Her dosyanın public API'si: fonksiyon imzaları ve dönüş tipleri\n"
             "2. Thread sınırları: hangi kod main thread'de, hangisi background thread'de\n"
@@ -185,7 +193,7 @@ def make_db_task(user_request: str, context: list) -> Task:
     return Task(
         description=(
             f"{ARCHITECTURE_BRIEF}\n\n"
-            f"Kullanıcı isteği: {user_request}\n\n"
+            f"Kullanıcı isteği yerine Yönetici Asistan Talimatı: {user_request}\n\n"
             "Mimari tasarımı kullanarak database.py dosyasını yaz.\n\n"
             "Zorunlu metodlar:\n"
             "- __init__(db_path): bağlantıyı aç, WAL'ı aktif et, 3 tabloyu oluştur\n"
@@ -214,7 +222,7 @@ def make_crawler_task(user_request: str, context: list) -> Task:
     return Task(
         description=(
             f"{ARCHITECTURE_BRIEF}\n\n"
-            f"Kullanıcı isteği: {user_request}\n\n"
+            f"Kullanıcı isteği yerine Yönetici Asistan Talimatı: {user_request}\n\n"
             "Mimari ve database.py kullanarak crawler_service.py yaz.\n\n"
             "MiniParser(HTMLParser):\n"
             "- handle_starttag: script/style/head → _skip=True; a tag → href topla\n"
@@ -255,7 +263,7 @@ def make_cli_task(user_request: str, context: list) -> Task:
     return Task(
         description=(
             f"{ARCHITECTURE_BRIEF}\n\n"
-            f"Kullanıcı isteği: {user_request}\n\n"
+            f"Kullanıcı isteği yerine Yönetici Asistan Talimatı: {user_request}\n\n"
             "Tüm önceki dosyaları import ederek main.py yaz.\n\n"
             "Yapı:\n"
             "- Database('crawler.db') ve CrawlerService(db) başlat\n"
@@ -286,7 +294,7 @@ def make_cli_task(user_request: str, context: list) -> Task:
 def make_qa_task(user_request: str, context: list) -> Task:
     return Task(
         description=(
-            f"Kullanıcı isteği: {user_request}\n\n"
+            f"Kullanıcı isteği yerine Yönetici Asistan Talimatı: {user_request}\n\n"
             "Üretilen tüm dosyaları denetle. Her kontrolü geç/geçemedi olarak işaretle "
             "ve başarısız olanları düzelt.\n\n"
             "database.py:\n"
