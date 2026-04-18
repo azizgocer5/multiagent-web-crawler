@@ -1,0 +1,3 @@
+# CrewAI Multi-Agent Workflow İçin Bağımlılıklar
+crewai>=0.86.0
+python-dotenv>=1.0.0

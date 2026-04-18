@@ -37,11 +37,11 @@ A simple Command Line Interface (or basic web UI) to interact with the system.
     3. View System State (`status`): Show indexing progress, current queue depth, active workers, and back pressure status.
 
 ## 4. Multi-Agent Development Guidelines
-This project is developed using a multi-agent workflow. Agents must respect boundaries:
-*   **Agent 1 (DB Architect):** Only handles `database.py` (Schema, WAL mode config, basic CRUD).
-*   **Agent 2 (Crawler Expert):** Only handles `indexer.py` (Async crawling, queue management, back pressure).
-*   **Agent 3 (Search Specialist):** Only handles `search.py` (Query logic, data retrieval).
-*   **Agent 4 (CLI/Integration Master):** Only handles `main.py` (CLI interface, threading/asyncio event loop management, connecting modules).
-*   **Agent 5 (QA/Test Manager):** Acts as a high-authority manager responsible for comprehensive quality assurance. Develops and executes testing infrastructure (`test_*.py`), runs necessary tests to verify system behavior against PRD bounds, and has the authority to rewind the development process or rollback changes if the standards are not met. Furthermore, can directly communicate with any specific agent whose subsystem fails testing and mandate them to fix the isolated issues.
+This project is developed and orchestrated using a CrewAI-based multi-agent workflow. Agents must respect their clear boundaries and generated artifacts:
+*   **Agent 1 (System Architect):** Determines the overall system design, thread boundaries, and concurrency model. Output: `architecture.md`.
+*   **Agent 2 (Database Engineer):** Handles `database.py` (Schema, WAL mode config, thread-safe asynchronous operations, and search queries).
+*   **Agent 3 (Crawler/Async System Developer):** Handles `crawler_service.py` (Async IO, `aiohttp` web crawling, queue management, back pressure).
+*   **Agent 4 (CLI & Integration Engineer):** Handles `main.py` (Interactive CLI, orchestrating the event loops and background worker threads) and `requirements.txt`.
+*   **Agent 5 (QA Engineer):** Acts as a code reviewer to analyze the generated pieces. Produces a detailed quality assurance and bug evaluation report (`qa_report.md`).
 
 All code must be clean, modular, and thoroughly commented.

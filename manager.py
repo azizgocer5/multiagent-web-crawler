@@ -1,99 +1,228 @@
+"""
+manager.py — Kullanıcıyla Konuşan Orkestratör
+
+Kullanıcıyla terminal üzerinde doğal dilde konuşur.
+Ne yapılmak istendiğini anlar, hangi agent(ların) çalışacağına karar verir,
+crew'u dinamik olarak o şekilde kurar ve tetikler.
+"""
+
 import os
-import sys
-from agents import run_agent, clean_code, db_architect_agent, crawler_expert_agent, search_specialist_agent, cli_integration_master_agent
+import re
+from crewai import Crew, Process
+from crew import (
+    architect, db_engineer, crawler_dev, cli_dev, qa,
+    make_architect_task, make_db_task, make_crawler_task,
+    make_cli_task, make_qa_task,
+)
 
-def interactive_manager():
-    print("="*60)
-    print("🎩 KİŞİSEL YAPAY ZEKA YÖNETİCİSİ (INTERACTIVE MANAGER) BAŞLADI")
-    print("="*60)
-    print("Bütün projeyi baştan üretmek yerine, sadece istediğiniz parçayı")
-    print("hedef alarak ilgili yazılımcı ajana düzelttiririm.\n")
-    
-    output_dir = "generated_code"
-    
-    # 1. Mevcut kodları diskten yükleyelim
-    codes = {}
-    expected_files = ["database.py", "indexer.py", "search.py", "main.py"]
-    
-    print("📂 Mevcut kodlar yükleniyor...")
-    for fname in expected_files:
-        path = os.path.join(output_dir, fname)
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                codes[fname] = f.read()
-        else:
-            print(f"⚠️ {fname} bulunamadı. Lütfen önce 'python agents.py' ile sistemi bir kez oluşturun.")
-            return
+# ── Routing Tablosu ───────────────────────────────────────────
+# SIRALAMA ÖNEMLİ: daha spesifik keyword'ler üstte olmalı.
+# "fix_crawler" → "fix"ten önce, "fix" → genel keyword'lerden önce.
 
-    print("✅ Tüm dosyalar hafızada. \nNe gibi bir değişiklik istersiniz? (Çıkmak için: exit)")
-    
+ROUTE_MAP = [
+    ("fix_main",    ["cli"]),
+    ("fix_crawler", ["crawler"]),
+    ("fix",         ["crawler", "cli"]),
+    ("hepsi",       ["architect", "db", "crawler", "cli", "qa"]),
+    ("tumu",        ["architect", "db", "crawler", "cli", "qa"]),
+    ("tümü",        ["architect", "db", "crawler", "cli", "qa"]),
+    ("bastan",      ["architect", "db", "crawler", "cli", "qa"]),
+    ("baştan",      ["architect", "db", "crawler", "cli", "qa"]),
+    ("sifirdan",    ["architect", "db", "crawler", "cli", "qa"]),
+    ("sıfırdan",    ["architect", "db", "crawler", "cli", "qa"]),
+    ("mimari",      ["architect"]),
+    ("tasarım",     ["architect"]),
+    ("database",    ["architect", "db"]),
+    ("veritabanı",  ["architect", "db"]),
+    ("crawler",     ["architect", "db", "crawler"]),
+    ("parser",      ["architect", "db", "crawler"]),
+    ("worker",      ["architect", "db", "crawler"]),
+    ("cli",         ["architect", "db", "crawler", "cli"]),
+    ("main",        ["architect", "db", "crawler", "cli"]),
+    ("komut",       ["architect", "db", "crawler", "cli"]),
+    ("qa",          ["qa"]),
+    ("test",        ["qa"]),
+    ("kontrol",     ["qa"]),
+    ("denetle",     ["qa"]),
+]
+
+# Sabit pipeline sırası — task'lar ve agent'lar hep bu sıraya göre kurulur.
+PIPELINE_ORDER = ["architect", "db", "crawler", "cli", "qa"]
+
+AGENT_MAP = {
+    "architect": architect,
+    "db":        db_engineer,
+    "crawler":   crawler_dev,
+    "cli":       cli_dev,
+    "qa":        qa,
+}
+
+TASK_BUILDER_MAP = {
+    "architect": make_architect_task,
+    "db":        make_db_task,
+    "crawler":   make_crawler_task,
+    "cli":       make_cli_task,
+    "qa":        make_qa_task,
+}
+
+# ── Routing ───────────────────────────────────────────────────
+
+def detect_route(user_message: str) -> list:
+    """
+    ROUTE_MAP'i sırayla tarar (list of tuples → öncelik korunur).
+    İlk eşleşen keyword'ün agent listesini döner.
+    Eşleşme yoksa tüm pipeline çalışır.
+    """
+    msg = user_message.lower()
+    for keyword, agents in ROUTE_MAP:
+        if keyword in msg:
+            return agents
+    return PIPELINE_ORDER[:]  # Varsayılan: hepsi
+
+# ── Task Zinciri ──────────────────────────────────────────────
+
+def build_tasks(route: list, user_request: str) -> list:
+    """
+    Seçilen agent'lar için task'ları PIPELINE_ORDER sırasına göre kurar.
+    Her task bir öncekinin çıktısını context olarak alır.
+    """
+    tasks = []
+    prev = None
+    for key in PIPELINE_ORDER:
+        if key not in route:
+            continue
+        context = [prev] if prev else []
+        task = TASK_BUILDER_MAP[key](user_request=user_request, context=context)
+        tasks.append(task)
+        prev = task
+    return tasks
+
+# ── Kod Temizleme ─────────────────────────────────────────────
+
+def extract_code_block(text: str, lang: str = "python") -> str:
+    """
+    Verilen lang'a göre ilk markdown code bloğunu çıkarır.
+    Bulamazsa ham metni döner.
+    """
+    pattern = rf"```{lang}\s*\n(.*?)```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    # Dil etiketi olmayan genel ``` bloğu dene
+    match = re.search(r"```\s*\n(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    return text.strip()
+
+def extract_requirements(text: str) -> str | None:
+    """
+    CLI agent çıktısından requirements.txt içeriğini ayıklar.
+    'aiohttp>=3.9.0' içeren satırı bulur.
+    """
+    for line in text.split("\n"):
+        if "aiohttp" in line and ">=" in line:
+            return line.strip()
+    return "aiohttp>=3.9.0"  # bulamazsa güvenli varsayılan
+
+# ── Dosya Kaydetme ────────────────────────────────────────────
+
+def save_outputs(tasks: list):
+    """
+    Her task'ın çıktısını ilgili dosyaya kaydeder.
+    task.output.raw → ham LLM çıktısı (str() yerine güvenli).
+    """
+    os.makedirs("generated_code", exist_ok=True)
+    print("\nDosyalar kaydediliyor (generated_code/)...")
+
+    for task in tasks:
+        # TaskOutput objesinden ham metni al
+        raw = task.output.raw if hasattr(task.output, "raw") else str(task.output)
+        role = task.agent.role
+
+        if role == "Sistem Mimarı":
+            path = "generated_code/architecture.md"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(raw)
+            print(f"  [OK] architecture.md")
+
+        elif role == "Veritabanı Mühendisi":
+            path = "generated_code/database.py"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(extract_code_block(raw, "python"))
+            print(f"  [OK] database.py")
+
+        elif role == "Async Sistem Geliştirici":
+            path = "generated_code/crawler_service.py"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(extract_code_block(raw, "python"))
+            print(f"  [OK] crawler_service.py")
+
+        elif role == "CLI ve Entegrasyon Mühendisi":
+            # main.py — python bloğunu al
+            path = "generated_code/main.py"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(extract_code_block(raw, "python"))
+            print(f"  [OK] main.py")
+
+            # requirements.txt — ayrı olarak ayıkla
+            req_path = "generated_code/requirements.txt"
+            with open(req_path, "w", encoding="utf-8") as f:
+                f.write(extract_requirements(raw) + "\n")
+            print(f"  [OK] requirements.txt")
+
+        elif role == "QA Mühendisi":
+            path = "generated_code/qa_report.md"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(raw)
+            print(f"  [OK] qa_report.md")
+
+# ── Ana Döngü ─────────────────────────────────────────────────
+
+def main():
+    print("=" * 60)
+    print("  Web Crawler Builder -- AI Gelistirme Asistani")
+    print("  Ne yapmami istersin? (cikmak icin 'exit')")
+    print("=" * 60)
+
     while True:
-        feedback = input("\n👤 Kurucu (Siz) > ").strip()
-        if not feedback:
-            continue
-        if feedback.lower() in ["exit", "q", "quit"]:
-            print("Kapatılıyor...")
+        try:
+            user_input = input("\nSen: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nGorusuruz!")
             break
-            
-        print("\n🤖 Yönetici Ajan: Talebinizi inceliyorum, hedef modülü bulacağım...")
-        
-        # 2. Hangi dosyanın değişeceğini karar veren Karar Ajanı
-        system_prompt = """You are the Project Manager Agent of a Multi-Agent AI System.
-The user has provided a feedback or change request for their python web crawler project.
-Analyze the request and decide EXACTLY which file needs to be modified.
-Options: [database.py, indexer.py, search.py, main.py]
 
-You must output EXACTLY the filename that needs to change, followed by a colon, and then detailed instructions for the specific developer module.
-Example 1: 'main.py: The user wants you to make the CLI table green.'
-Example 2: 'indexer.py: The user wants to change thread count to 20.'
-
-If multiple files need changes, pick the most relevant one first."""
-        
-        codes_context = "\n".join([f"=== {k} ===\n{v}" for k, v in codes.items()])
-        user_message = f"USER REQUEST: {feedback}\n\nCURRENT FILES:\n{codes_context}"
-        
-        manager_decision = run_agent(system_prompt, user_message, agent_name="Interactive_Manager")
-        print(f"🎯 Hedef Belirlendi: {manager_decision}\n")
-        
-        target_file = None
-        instruction = ""
-        
-        # 3. İlgili Ajana Yönlendirme
-        if "database.py:" in manager_decision:
-            target_file = "database.py"
-            instruction = manager_decision.split("database.py:")[1]
-            print("🛠️ DB Architect çalışıyor, veritabanını güncelliyor...")
-            codes[target_file] = clean_code(db_architect_agent(f"Modify database.py based on user feedback:\n{instruction}\n\nCurrent code:\n{codes[target_file]}"))
-            
-        elif "indexer.py:" in manager_decision:
-            target_file = "indexer.py"
-            instruction = manager_decision.split("indexer.py:")[1]
-            print("🕸️ Crawler Expert çalışıyor, tarayıcıyı güncelliyor...")
-            codes[target_file] = clean_code(crawler_expert_agent(f"Modify indexer.py based on user feedback:\n{instruction}\n\nCurrent code:\n{codes[target_file]}"))
-            
-        elif "search.py:" in manager_decision:
-            target_file = "search.py"
-            instruction = manager_decision.split("search.py:")[1]
-            print("🔍 Search Specialist çalışıyor, arama motorunu güncelliyor...")
-            codes[target_file] = clean_code(search_specialist_agent(f"Modify search.py based on user feedback:\n{instruction}\n\nCurrent code:\n{codes[target_file]}"))
-            
-        elif "main.py:" in manager_decision:
-            target_file = "main.py"
-            instruction = manager_decision.split("main.py:")[1]
-            gen_context = f"=== database.py ===\n{codes['database.py']}\n=== indexer.py ===\n{codes['indexer.py']}\n=== search.py ===\n{codes['search.py']}"
-            print("💻 CLI Master çalışıyor, arayüzü güncelliyor...")
-            codes[target_file] = clean_code(cli_integration_master_agent(f"Modify main.py based on user feedback:\n{instruction}\n\nCurrent main.py code:\n{codes[target_file]}", gen_context))
-            
-        else:
-            print("❌ Yönetici Agent hedef dosyayı anlayamadı. Lütfen daha belirgin yazın.")
+        if not user_input:
             continue
-            
-        # 4. Dosyayı diske yazma
-        file_path = os.path.join(output_dir, target_file)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(codes[target_file])
-            
-        print(f"✅ Bitti! {target_file} dosyası başarıyla yeniden yazıldı ve kaydedildi.")
+        if user_input.lower() in ("exit", "cikis", "q"):
+            print("Gorusuruz!")
+            break
+
+        route = detect_route(user_input)
+        print(f"\n[Manager] Calisacak agent'lar: {' -> '.join(route)}")
+
+        tasks = build_tasks(route, user_input)
+
+        # Agent listesi task sırasıyla eşleşsin (PIPELINE_ORDER garantisi)
+        active_agents = [AGENT_MAP[key] for key in PIPELINE_ORDER if key in route]
+
+        crew = Crew(
+            agents=active_agents,
+            tasks=tasks,
+            process=Process.sequential,
+            verbose=True,
+        )
+
+        print(f"[Manager] {len(tasks)} gorev baslatiliyor...\n")
+        crew.kickoff()
+
+        save_outputs(tasks)
+
+        print("=" * 60)
+        print("[Manager] Tum gorevler tamamlandi.")
+        print("Baska bir sey ister misin?")
+
 
 if __name__ == "__main__":
-    interactive_manager()
+    main()

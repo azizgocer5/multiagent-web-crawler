@@ -1,86 +1,58 @@
 import asyncio
-import sys
-import logging
+from crawler_service import CrawlerService
 from database import Database
-from indexer import Crawler
-from search import SearchEngine
 
-# Configure Logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+async def main():
+    db = Database('crawler.db')
+    lock = asyncio.Lock()
+    service = CrawlerService(db)
 
-class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    END = '\033[0m'
-    BOLD = '\033[1m'
-
-def print_menu():
-    menu = f"""
-{Colors.BLUE}
-   ___               _           _     ___               _           
-  / __|_ _ __ _ __ _| |___ _ _  | |   / __|___ _ _  _ __| |___ _ _ 
- | (__| '_/ _` / _` | / -_) '_| | |__| (__/ _ \ ' \| '_ \ / -_) '_|
-  \___|_| \__,_\__,_|_\___|_|   |____|\___\___/_||_| .__/_\___|_|  
-                                                   |_|             
-{Colors.YELLOW}>> Main Menu{Colors.END}
-{Colors.GREEN}1.{Colors.END} Start Crawler (Seed URL + Max Depth)
-{Colors.GREEN}2.{Colors.END} Search Indexed Pages
-{Colors.GREEN}3.{Colors.END} Show Status
-{Colors.GREEN}4.{Colors.END} Exit
-"""
-    print(menu)
-
-async def run_cli():
-    db = Database("crawler.db")
-    await db.initialize()
-    search_engine = SearchEngine("crawler.db")
-    
     while True:
-        print_menu()
-        choice = await asyncio.get_event_loop().run_in_executor(None, input, f"\n{Colors.BOLD}Crawler (User) > {Colors.END}")
-        
-        if choice == '1':
-            url = await asyncio.get_event_loop().run_in_executor(None, input, "Enter seed URL: ")
-            depth = await asyncio.get_event_loop().run_in_executor(None, input, "Enter max depth (e.g. 2): ")
-            
-            print(f"{Colors.YELLOW}Starting crawler at {url} with depth {depth}...{Colors.END}")
-            crawler = Crawler(db=db, max_depth=int(depth))
-            asyncio.create_task(crawler.run(url))
-            print(f"{Colors.GREEN}✔ Crawler task initiated in background.{Colors.END}")
+        komut_raw = await asyncio.to_thread(input, '> ')
+        komut = komut_raw.split()
+        if not komut:
+            continue
 
-        elif choice == '2':
-            query = await asyncio.get_event_loop().run_in_executor(None, input, "Enter search query: ")
-            print(f"{Colors.BLUE}Searching for '{query}'...{Colors.END}")
-            results = await search_engine.search(query)
-            
+        if komut[0] == 'crawl':
+            if len(komut) != 3:
+                print("Kullanım: crawl <url> <depth>")
+                continue
+            url, depth = komut[1], komut[2]
+            await db.set_setting('max_depth', str(depth))
+            await db.add_to_queue(lock, [url], depth=0)
+            service.start_in_background(url, int(depth))
+
+        elif komut[0] == 'search':
+            if len(komut) != 2:
+                print("Kullanım: search <query>")
+                continue
+            query = komut[1]
+            results = await db.search(query)
             if not results:
-                print(f"{Colors.RED}No results found.{Colors.END}")
-            else:
-                print(f"\n{Colors.BOLD}{'URL':<50} | {'Title':<30}{Colors.END}")
-                print("-" * 85)
-                for r in results:
-                    title = (r['title'] or "No Title")[:30]
-                    print(f"{r['url'][:50]:<50} | {title:<30}")
+                print("Sonuç bulunamadı.")
+            for result in results:
+                # url, title, score
+                print(f"[Score: {result[2]}] {result[1]} (kaynak: {result[0]})")
 
-        elif choice == '3':
-            stats = await db.get_status_report()
-            print(f"\n{Colors.HEADER}--- System Status ---{Colors.END}")
-            print(f"{Colors.BLUE}Total Pages Indexed:{Colors.END} {stats['total_indexed']}")
-            print(f"{Colors.BLUE}Queue Statistics:{Colors.END}")
-            for state, count in stats['queue_stats'].items():
-                print(f"  - {state.capitalize()}: {count}")
+        elif komut[0] == 'status':
+            status = await db.get_status()
+            print(f"Bekleyen: {status['pending']} | İşleniyor: {status['processing']} | Tamamlanan: {status['done']}")
 
-        elif choice == '4':
-            print(f"{Colors.YELLOW}Shutting down...{Colors.END}")
+        elif komut[0] == 'resume':
+            await db.resume_processing(lock)
+            max_depth = int(await db.get_setting('max_depth') or 2)
+            service.resume_in_background(max_depth)
+
+        elif komut[0] == 'exit':
             break
-        else:
-            print(f"{Colors.RED}Invalid selection. Please enter 1-4.{Colors.END}")
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(run_cli())
-    except KeyboardInterrupt:
-        sys.exit(0)
+        else:
+            print("Kullanım:")
+            print("  crawl <url> <depth>")
+            print("  search <query>")
+            print("  status")
+            print("  resume")
+            print("  exit")
+
+if __name__ == '__main__':
+    asyncio.run(main())
