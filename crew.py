@@ -17,13 +17,13 @@ load_dotenv()
 
 MODEL_CHAIN = [
     # ── Groq modelleri (öncelikli) ──
+    {"model": "gemini/gemini-3.1-flash-lite-preview",   "api_key": os.getenv("API_KEY")},
     {"model": "groq/llama-3.3-70b-versatile",                   "api_key": os.getenv("GROQ_KEY")},
     # ── Gemini modelleri ──
     {"model": "gemini/gemini-2.5-pro",                  "api_key": os.getenv("API_KEY")},
     {"model": "gemini/gemini-2.5-pro-preview-05-06",    "api_key": os.getenv("API_KEY")},
     {"model": "gemini/gemini-2.5-flash-preview-04-17",  "api_key": os.getenv("API_KEY")},
     {"model": "gemini/gemini-2.0-flash",                "api_key": os.getenv("API_KEY")},
-    {"model": "gemini/gemini-3.1-flash-lite-preview",   "api_key": os.getenv("API_KEY")},
     {"model": "gemini/gemini-2.0-flash-lite",           "api_key": os.getenv("API_KEY")},
     {"model": "gemini/gemini-1.5-flash",                "api_key": os.getenv("API_KEY")},
     # ── Groq modelleri (fallback) ──
