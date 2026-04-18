@@ -1,52 +1,10 @@
-Bu mimari doküman, "Mini Google" projesinin asenkron çalışma prensiplerini, thread yönetimini ve veri akışını tanımlayan referans belgesidir.
+# Mimari Tasarım Belgesi: Mini Google Crawler (v1.0)
 
-### 1. Mimari Tasarım ve API Tanımları
-
-#### `database.py`
-SQLite işlemlerini yönetir. `asyncio.Lock` ile thread-safe yazma garantisi verir.
-*   `def __init__(db_path: str)`: Bağlantıyı kurar, `PRAGMA journal_mode=WAL` uygular, tabloyu oluşturur.
-*   `async def save_pages(pages: list[tuple[str, str, str]]) -> None`: `executemany` kullanarak veritabanına toplu yazar.
-*   `async def close() -> None`: Bağlantıyı kapatır.
-
-#### `crawler_service.py`
-`aiohttp` ile ağ trafiğini yönetir ve `MiniParser` ile veriyi işler.
-*   `class CrawlerService`:
-    *   `__init__(self, db: Database, max_concurrent: int, user_agent: str)`
-    *   `async def crawl(self, start_urls: list[str]) -> None`: Ana giriş noktası.
-    *   `async def _fetch(self, session: aiohttp.ClientSession, url: str) -> str | None`
-    *   `async def _run_index_job(self, queue: asyncio.Queue) -> None`: Producer mantığı.
-
-#### `main.py`
-CLI arayüzü ve uygulama yaşam döngüsü.
-*   `async def main()`: Servisleri başlatır ve `asyncio.run` ile döngüyü yönetir.
+Bu belge, sistemin asenkron yapısını, modüller arası arayüzleri ve veri akışını tanımlayan referans dokümanıdır.
 
 ---
 
-### 2. Thread Sınırları
-*   **Main Thread:** Tüm `asyncio` event loop'u bu thread'de çalışır.
-*   **Background Thread:** SQLite `sqlite3` kütüphanesi bloklayıcı olduğu için, yoğun I/O işlemlerinde `loop.run_in_executor` kullanılarak veritabanı işlemleri ayrı bir thread havuzuna delege edilebilir (Opsiyonel ancak önerilir). Ancak mevcut kısıtlar dahilinde `asyncio.Lock` ile main thread üzerinde senkronize edilmiştir.
-
----
-
-### 3. Veri Akış Diyagramı
-1.  **Giriş:** `main.py` üzerinden URL listesi `CrawlerService.crawl` metoduna iletilir.
-2.  **Kuyruklama:** URL'ler `asyncio.Queue` yapısına eklenir.
-3.  **Fetch:** `CrawlerService`, `aiohttp` ile sayfayı çeker.
-4.  **Parse:** `MiniParser` (HTMLParser), ham HTML'i işler ve metin/linkleri ayıklar.
-5.  **Lock & Write:** `database.py` içindeki `save_pages` metodu `asyncio.Lock` edinir.
-6.  **Commit:** `executemany` ile veriler `Pages` tablosuna yazılır ve lock serbest bırakılır.
-
----
-
-### 4. CrawlerService Instance Değişkenleri
-*   `self.db`: Database sınıfı örneği.
-*   `self.session`: `aiohttp.ClientSession` (headers tanımlı).
-*   `self.max_concurrent`: Semaphor için limit.
-*   `self.lock`: `asyncio.Lock()` (yazma işlemleri için).
-
----
-
-### 5. Uygulama Kodları
+### 1. Dosya API'leri ve Arayüzler
 
 #### `database.py`
 ```python
@@ -54,68 +12,72 @@ import sqlite3
 import asyncio
 
 class Database:
-    def __init__(self, db_path: str):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("CREATE TABLE IF NOT EXISTS pages (url TEXT, title TEXT, content TEXT)")
-        self.lock = asyncio.Lock()
-
-    async def save_pages(self, pages: list[tuple[str, str, str]]):
-        async with self.lock:
-            self.conn.executemany("INSERT INTO pages VALUES (?, ?, ?)", pages)
-            self.conn.commit()
+    def __init__(self, db_path: str) -> None: ...
+    async def initialize(self) -> None: ...  # WAL mode ve tablo kurulumu
+    async def save_pages(self, data: list[tuple[str, str]]) -> None: ... # executemany
+    async def close(self) -> None: ...
 ```
 
 #### `crawler_service.py`
 ```python
-import asyncio
 import aiohttp
-from html.parser import HTMLParser
-
-class MiniParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.data = []
-    def handle_data(self, data):
-        self.data.append(data)
+import asyncio
+from database import Database
 
 class CrawlerService:
-    def __init__(self, db, max_concurrent=5):
-        self.db = db
-        self.max_concurrent = max_concurrent
-        self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-
-    async def _run_index_job(self, queue: asyncio.Queue):
-        async with aiohttp.ClientSession(headers=self.headers) as session:
-            while not queue.empty():
-                url = await queue.get()
-                try:
-                    async with session.get(url) as resp:
-                        html = await resp.text()
-                        # Parsing ve DB işlemleri burada
-                        await self.db.save_pages([(url, "Title", html[:100])])
-                finally:
-                    queue.task_done()
-                
-                if queue.empty(): break
+    def __init__(self, db: Database, max_concurrent: int, delay: float) -> None: ...
+    async def crawl(self, start_url: str) -> None: ...
+    async def _fetch(self, session: aiohttp.ClientSession, url: str) -> str | None: ...
+    async def _parse(self, html: str) -> list[str]: ...
 ```
 
 #### `main.py`
 ```python
-import asyncio
 from database import Database
 from crawler_service import CrawlerService
 
-async def main():
-    db = Database("crawler.db")
-    crawler = CrawlerService(db)
-    queue = asyncio.Queue()
-    
-    urls = ["https://en.wikipedia.org/wiki/Main_Page"]
-    for u in urls: await queue.put(u)
-    
-    await crawler._run_index_job(queue)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+async def main() -> None: ...
 ```
+
+---
+
+### 2. Thread Sınırları
+
+*   **Main Thread:** Tüm `asyncio` event loop'u bu thread üzerinde çalışır.
+*   **I/O Operasyonları:** `aiohttp` (Network I/O) ve `sqlite3` (Disk I/O) işlemleri, `asyncio` event loop'unu bloklamayacak şekilde `await` anahtar kelimesi ile yönetilir.
+*   **Kısıt:** `sqlite3` kütüphanesi doğası gereği bloklayıcıdır. `Database` sınıfı içindeki metodlar, `asyncio.to_thread` veya `loop.run_in_executor` kullanılarak veya `aiosqlite` benzeri bir yapı taklit edilerek (thread-safe lock ile) main thread'in bloklanması engellenmelidir.
+
+---
+
+### 3. Veri Akış Diyagramı
+
+1.  **Başlatma:** `main.py` -> `Database` (init) -> `CrawlerService` (init).
+2.  **İstek:** `CrawlerService` -> `aiohttp.ClientSession.get()` -> `HTML Content`.
+3.  **İşleme:** `HTML Content` -> `MiniParser` (HTMLParser) -> `List[URLs]`.
+4.  **Senkronizasyon:** `CrawlerService` -> `asyncio.Lock()` (Lock edinilir).
+5.  **Kalıcılık:** `Database.save_pages()` -> `sqlite3.executemany()` -> `Pages` tablosu.
+6.  **Tamamlama:** `asyncio.Lock()` (Lock serbest bırakılır).
+
+---
+
+### 4. CrawlerService.__init__ ve Instance Değişkenleri
+
+**Parametreler:**
+*   `db` (`Database`): Veritabanı yönetim sınıfı instance'ı.
+*   `max_concurrent` (`int`): `asyncio.Semaphore` için eşzamanlılık sınırı.
+*   `delay` (`float`): İstekler arası `asyncio.sleep()` süresi.
+
+**Instance Değişkenleri:**
+*   `self.db`: `Database` objesi.
+*   `self.semaphore`: `asyncio.Semaphore(max_concurrent)` (Bağlantı darboğazını önlemek için).
+*   `self.lock`: `asyncio.Lock()` (Veritabanı yazma çakışmalarını önlemek için).
+*   `self.visited`: `set[str]` (Ziyaret edilen URL'leri takip etmek için).
+*   `self.delay`: `float` (Hız sınırlayıcı).
+
+---
+
+### Teknik Notlar (Mimari Kurallar)
+*   **Modül Dışa Aktarma:** `database.py` içerisinde `__all__ = ["Database"]` tanımlanarak sadece `Database` sınıfının dışarıya açık olması sağlanmalıdır.
+*   **WAL Modu:** `Database.initialize` metodu içerisinde `connection.execute("PRAGMA journal_mode=WAL;")` çağrısı zorunludur.
+*   **Hata Yönetimi:** `MiniParser` içerisinde `handle_starttag` metodu sadece `<a>` etiketlerini ve `href` niteliklerini toplamalıdır.
+*   **Güvenlik:** `sqlite3` işlemlerinde SQL Injection'ı önlemek için her zaman parametreli sorgular (`?` placeholder) kullanılmalıdır.
